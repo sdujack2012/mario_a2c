@@ -14,10 +14,17 @@ min_esplison = 0.3
 render = True
 load_model = True
 episodes_before_training = 10
-# reward gamma
+n_env = 4
+n_steps = 200
+max_grad_norm = 0.5
+ent_coef = 0.001
+vf_coef = 0.5
 GAMMA = 0.99
 LAMBDA = 0.95
-lr = 0.0001
+lr = 0.000003 
+skip_frames = 4
+
+# reward gamma
 
 # prioritized memory replay
 e = 0.00001

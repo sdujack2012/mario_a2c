@@ -1,200 +1,122 @@
 
 import tensorflow as tf
-from skimage import transform 
-
 import numpy as np
 import matplotlib.pyplot as plt
 import random
+
+from utils import create_layers
+
+conv2d, dense, flatten = create_layers()
+
+
 class A2CAgent():
-    def __init__(self, input_shape, action_size, previous_actions_size, lr, GAMMA, LAMBDA, loadModel):
+
+    def __init__(self, name, trainable, sess, input_shape, action_size, lr, GAMMA, LAMBDA, max_grad_norm, ent_coef, vf_coef, loadModel):
+        self.sess = sess
         self.input_shape = input_shape
         self.action_size = action_size
-        self.previous_actions_size = previous_actions_size
         self.lr = lr
         self.GAMMA = GAMMA
         self.LAMBDA = LAMBDA
+        self.max_grad_norm = max_grad_norm
+        self.ent_coef = ent_coef
+        self.vf_coef = vf_coef
+        self.trainable = trainable
+        self.name = name
 
-        self.model, self.train_model = self.build_agent()
-        self.old_model = self.build_agent()[0]
+        with tf.variable_scope(self.name+"/", reuse=tf.AUTO_REUSE):
+            self.state_input = tf.placeholder(tf.float64, shape=(
+                None, *self.input_shape), name="state")
+            self.actions_input = tf.placeholder(tf.uint8, shape=(
+                None,), name="actions_input")
+            self.cumulative_rewards_input = tf.placeholder(
+                tf.float64, shape=(None,), name="cumulative_rewards_input")
+            self.state_values_input = tf.placeholder(
+                tf.float64, shape=(None,), name="state_values_input")
+
+        self.actor_out, self.critic_out, self.saver = self._build_agent(
+            self.trainable)
+
+        if self.trainable:
+            self.train_model, self.actor_loss, self.critic_loss, self.entropy = self._build_ops()
+
         if loadModel:
             self.load_weights()
 
-        self.old_model.set_weights(self.model.get_weights())
+    def _build_agent(self, trainable=True):
+        with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE):
 
-    def update_old_model(self):
-        self.old_model.set_weights(self.model.get_weights())
-        
-    def build_agent(self):
-        image_input = Input(shape=self.input_shape)
+            self.sess.run(tf.local_variables_initializer())
 
-        image_output = Conv2D(
-            filters=32, padding='valid', kernel_size=3, strides=2, kernel_initializer=keras.initializers.he_uniform(),
-                                 bias_initializer=keras.initializers.he_uniform())(image_input)
-        image_output = BatchNormalization(
-            trainable=True)(image_output)
-        image_output = Activation("elu")(image_output)
+            shared_net = conv2d(self.state_input, 3, 32,
+                                "VALID", strides=2, activation=tf.nn.relu, trainable=trainable)
+            shared_net = conv2d(shared_net, 3, 32, "VALID",
+                                strides=2, activation=tf.nn.relu, trainable=trainable)
+            shared_net = conv2d(shared_net, 3, 32, "VALID",
+                                strides=1, activation=tf.nn.relu, trainable=trainable)
+            shared_net = conv2d(shared_net, 3, 32, "VALID",
+                                strides=1, activation=tf.nn.relu, trainable=trainable)
 
-        image_output = Conv2D(
-            filters=32, padding='valid', kernel_size=3, strides=2, kernel_initializer=keras.initializers.he_uniform(),
-                                 bias_initializer=keras.initializers.he_uniform())(image_output)
-        image_output = BatchNormalization(
-            trainable=True)(image_output)
-        image_output = Activation("elu")(image_output)
+            shared_net = flatten(shared_net)
 
-        image_output = Conv2D(
-            filters=32, padding='valid', kernel_size=3, strides=1, kernel_initializer=keras.initializers.he_uniform(),
-                                 bias_initializer=keras.initializers.he_uniform())(image_output)
-        image_output = BatchNormalization(
-            trainable=True)(image_output)
-        image_output = Activation("elu")(image_output)
-        
-        image_output = Conv2D(
-            filters=32, padding='valid', kernel_size=3, strides=1, kernel_initializer=keras.initializers.he_uniform(),
-                                 bias_initializer=keras.initializers.he_uniform())(image_output)
-        image_output = BatchNormalization(
-            trainable=True)(image_output)
+            actor_out = dense(
+                shared_net, 512, activation=tf.nn.relu, trainable=trainable)
+            actor_out = dense(actor_out, self.action_size,
+                              activation=tf.nn.softmax, trainable=trainable)
 
-        image_output = Flatten()(image_output)
+            critic_out = dense(
+                shared_net, 512, activation=tf.nn.relu, trainable=trainable)
+            critic_out = dense(critic_out, 1, trainable=trainable)
 
-        previous_actions_input = Input(shape=(self.previous_actions_size,))
+            saver = tf.train.Saver(var_list=tf.get_collection(
+                tf.GraphKeys.GLOBAL_VARIABLES, scope=self.name))
 
-        merged_out = Concatenate()([image_output, previous_actions_input])
-        merged_out = Activation("elu")(merged_out)
+            return actor_out, critic_out, saver
 
-        actor_output = Dense(512)(merged_out)
-        actor_output = BatchNormalization(
-            trainable=True)(actor_output)
-        actor_output = Activation("elu")(actor_output)
-        actor_output = Dense(self.action_size, activation="softmax", kernel_initializer=keras.initializers.he_uniform(),
-                                 bias_initializer=keras.initializers.he_uniform())(actor_output)
+    def _build_ops(self):
+        with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE):
+            advantages = self.cumulative_rewards_input - self.critic_out
 
-        critic_output = Dense(512)(merged_out)
-        critic_output = BatchNormalization(
-            trainable=True)(critic_output)
-        critic_output = Activation("elu")(critic_output)
-        critic_output = Dense(1, kernel_initializer=keras.initializers.he_uniform(),
-                                   bias_initializer=keras.initializers.he_uniform())(critic_output)
+            critic_loss = tf.reduce_mean(tf.square(advantages))
 
-        model = Model(
-            inputs=[image_input, previous_actions_input], outputs=[actor_output, critic_output])
+            action_one_hot = tf.one_hot(self.actions_input, self.action_size, dtype=tf.float64)
+            logs = tf.log(tf.reduce_sum(
+                self.actor_out * action_one_hot, axis=1))
+            actor_loss = tf.reduce_mean(logs * advantages)
 
-        action_pl = K.placeholder(shape=(None, self.action_size))
-        advantages_pl = K.placeholder(shape=(None,))
-        discounted_rewards_pl = K.placeholder(shape=(None,))
-        old_model_output_pl = K.placeholder(shape=(None, self.action_size))
+            entropy = tf.reduce_mean(self.actor_out * tf.log(self.actor_out))
 
-        optimizer= RMSprop(lr=self.lr, epsilon=0.1, rho=0.99)
+            loss = self.vf_coef * critic_loss - actor_loss - self.ent_coef * entropy
 
-        weighted_actions = K.sum(action_pl * model.output[0], axis=1)
-        old_weighted_actions = K.sum(action_pl * old_model_output_pl, axis=1)
+            optimizer = tf.train.AdamOptimizer(learning_rate=self.lr)
 
-        ration = weighted_actions / old_weighted_actions
+            params = tf.trainable_variables()
+            grads = tf.gradients(loss, params)
 
-        cliped_ration = K.clip(ration, 0.8, 1.2)
-        
-        entropy = K.mean(model.output[0] * K.log(K.clip(model.output[0], 1e-10, 1)))
+            if self.max_grad_norm is not None:
+                # Clip the gradients (normalize)
+                grads, _ = tf.clip_by_global_norm(grads, self.max_grad_norm)
+                grads = list(zip(grads, params))
 
-        actor_loss = 0 - K.mean(K.minimum(ration * advantages_pl, cliped_ration * advantages_pl) )
+            train_model = optimizer.apply_gradients(grads)
 
-        critic_loss = 0.5 * K.mean(K.square(discounted_rewards_pl - model.output[1]))
+            return train_model, actor_loss, critic_loss, entropy
 
-        loss = actor_loss + 0.5 * critic_loss - 0.001 * entropy
+    def sync_from_model(self, from_model):
+        update_weights = [tf.assign(new, old) for (new, old) in zip(
+            tf.trainable_variables(self.name), tf.trainable_variables(from_model.name))]
+        self.sess.run(update_weights)
 
-        updates = optimizer.get_updates(model.trainable_weights, [], loss)
-        
-        train_model = K.function([model.input[0], model.input[1], action_pl, advantages_pl, discounted_rewards_pl, old_model_output_pl], [critic_loss, actor_loss, loss], updates=updates)
-
-        return model, train_model
-
-    def save(self):
-        self.model.save_weights('./mario_model.h5')
-        self.model.save_weights('./backup_mario_model.h5')
+    def save_weights(self):
+        self.saver.save(self.sess, f"./{self.name}.ckpt")
 
     def load_weights(self):
-        self.model.load_weights('./mario_model.h5')
+        self.saver.restore(self.sess, f"./{self.name}.ckpt")
 
-    def get_action_and_value(self, states, previous_actions):
-        return self.model.predict([states, previous_actions])
+    def get_action_and_value(self, state):
+        return self.sess.run([self.actor_out, self.critic_out], feed_dict={self.state_input: state})
 
-    def train(self, states, previous_actions, state_values, next_state_values, actions, rewards, dones):
-        """ Update actor and critic networks from experience
-        """
-        # Compute discounted rewards and Advantage (TD. Error)
-        old_model_output = self.old_model.predict([states, previous_actions])[0]
-        discounted_rewards = np.array(self.discount(rewards))
-        advantages = np.array(self.get_gaes(rewards, state_values, next_state_values, self.GAMMA, self.LAMBDA))
-
-        # Networks optimization
-       
-        return self.train_model([states, previous_actions, actions, advantages, discounted_rewards, old_model_output])
-
-    def process_episode_experiences(self, experiences):
-        state_index = 0
-        previous_action_index = 1
-        action_index = 2
-        state_value_index = 3
-        reward_index = 4
-        done_index = 5
-
-        states = [experience[state_index] for experience in  experiences]
-        previous_actions = [experience[previous_action_index] for experience in  experiences]
-        state_values = [experience[state_value_index] for experience in  experiences]
-        next_state_values = state_values[1:] + [0]
-
-        actions = [experience[action_index] for experience in  experiences]
-        rewards = [experience[reward_index] for experience in  experiences]
-        dones = [experience[done_index] for experience in  experiences]
-
-        return states, previous_actions, state_values, next_state_values, actions, rewards, dones
-
-    def train_with_experiences(self, episode_experiences):
-        all_states = []
-        all_previous_actions = []
-        all_state_values = []
-        all_next_state_values = []
-        all_actions = []
-        all_rewards = []
-        all_dones = []
-
-        for experiences in episode_experiences:
-            states, previous_actions, state_values, next_state_values, actions, rewards, dones = self.process_episode_experiences(experiences)
-            all_states += states
-            all_previous_actions += previous_actions
-            all_state_values += state_values
-            all_next_state_values += next_state_values
-            all_actions += actions
-            all_rewards += rewards
-            all_dones += dones
-
-        length = len(all_states)
-        shuffled = list(range(length))
-        random.shuffle(shuffled)
-        all_states = np.array(all_states)[shuffled]
-        all_previous_actions = np.array(all_previous_actions)[shuffled]
-        all_state_values = np.array(all_state_values)[shuffled]
-        all_next_state_values = np.array(all_next_state_values)[shuffled]
-        all_actions = np.array(all_actions)[shuffled]
-        all_rewards = np.array(all_rewards)[shuffled]
-        all_dones = np.array(all_dones)[shuffled]
-
-        bacth_size = 32
-        bacth_index = range(0, len(all_states))
-        bacthes = np.array_split(bacth_index, bacth_size)
-        for batch in bacthes:
-            critic_loss, actor_loss, loss = self.train(all_states[batch], all_previous_actions[batch], all_state_values[batch], all_next_state_values[batch], all_actions[batch], all_rewards[batch], all_dones[batch])
-            print(f"critic_loss:{critic_loss}, actor_loss:{actor_loss}, loss:{loss}")
-        
-    def discount(self, r):
-        discounted_r = np.zeros(len(r))
-        cumul_r = 0
-        for t in reversed(range(len(r))):
-            cumul_r = r[t] + cumul_r * self.GAMMA
-            discounted_r[t] = cumul_r
-        return discounted_r
-        
-    # We are defining the function to get the Generalized Advantage Estimation
-    def get_gaes(self, rewards, state_values, next_state_values, GAMMA, LAMBDA):
-        gaes = np.array([r_t + GAMMA * next_v - v for r_t, next_v, v in zip(rewards, next_state_values, state_values)])
-        for t in reversed(range(len(gaes) - 1)):
-            gaes[t] = gaes[t] + LAMBDA * GAMMA * gaes[t + 1]
-        return gaes
+    def train(self, states, actions, cumulative_rewards):
+        _, critic_loss, actor_loss, entropy = self.sess.run([self.train_model, self.critic_loss, self.actor_loss, self.entropy], {
+                                                   self.state_input: states, self.actions_input: actions, self.cumulative_rewards_input: cumulative_rewards})
+        print(f"critic_loss:{critic_loss}, actor_loss:{actor_loss}, entropy:{entropy}")

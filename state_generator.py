@@ -2,12 +2,9 @@
 import numpy as np
 import time
 import os
-import cv2
 import datetime
 from collections import deque
 from PIL import Image
-
-from training_parameters import top_cutoff, bottom_cutoff
 
 class StateGenerator:
     def __init__(self, frame_size, stack_size):
@@ -28,9 +25,9 @@ class StateGenerator:
         return stacked_state
 
     def process_screenshot(self, screenshot):
-        croped_screenshot = Image.fromarray(screenshot[top_cutoff:bottom_cutoff,:]).convert('L')
+        croped_screenshot = Image.fromarray(screenshot).convert('L')
         currentDT = datetime.datetime.now()
-        croped_screenshot.save(f"./screenshots/screenshots_{currentDT.strftime('%H%M%S')}.png")
+        #croped_screenshot.save(f"./screenshots/screenshots_{currentDT.strftime('%H%M%S')}.png")
         resized_screenshot = croped_screenshot.resize(
             self.frame_size[::-1], Image.BICUBIC)
         normalized_screenshot = np.asarray(resized_screenshot) / 255.0

@@ -6,17 +6,18 @@ sample_size = 32
 epoch = 1
 max_episodes = 2000
 training_before_update_target = 5000
-max_steps = 3000
-experiences_before_training = 3000
+max_steps = 1200
+experiences_before_training = 6000
 esplison = 0.7
 esplison_decay = 0.0001
 min_esplison = 0.3
 render = True
-load_model = False
+load_model = True
+episodes_before_training = 10
 # reward gamma
 GAMMA = 0.99
 LAMBDA = 0.95
-lr = 0.00005
+lr = 0.0001
 
 # prioritized memory replay
 e = 0.00001

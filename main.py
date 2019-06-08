@@ -22,20 +22,22 @@ def run_env(env):
 
 if __name__ == "__main__":
     n_env = multiprocessing.cpu_count()
-
-    tf.reset_default_graph()
-    gpu_options = tf.GPUOptions(allow_growth=True)
-    sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
-    summary_writer = tf.summary.FileWriter("./log/sum", sess.graph)
-  
     envs = [EnvWrapper(frame_size, skip_frames, stack_size)
             for i in range(n_env)]
     action_size = envs[0].get_action_size()
+    
+            
+    tf.reset_default_graph()
+    gpu_options = tf.GPUOptions(allow_growth=True)
+    sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+    train_model = A2CAgent("train_model", sess, input_shape, action_size,
+                           lr, GAMMA, LAMBDA, max_grad_norm, ent_coef, vf_coef, load_model)
+    summary_writer = tf.summary.FileWriter("./log/sum", sess.graph)
+    
 
     # envs[0].set_render(True)
 
-    train_model = A2CAgent("train_model", sess, input_shape, action_size,
-                           lr, GAMMA, LAMBDA, max_grad_norm, ent_coef, vf_coef, load_model)
+    
     for env in envs:
         env.set_agent(train_model)
     p = ThreadPool(n_env)

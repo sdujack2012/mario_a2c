@@ -15,12 +15,12 @@ load_model = True
 episodes_before_training = 10
 n_env = 4
 n_steps = 5
-max_grad_norm = 0.3
+max_grad_norm = 0.5
 ent_coef = 0.001
 vf_coef = 0.5
 GAMMA = 0.99
 LAMBDA = 0.95
-lr = 0.00001
+lr = 0.00005
 skip_frames = 4
 
 # reward gamma

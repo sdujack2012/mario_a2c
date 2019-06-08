@@ -26,9 +26,8 @@ if __name__ == "__main__":
 
     # envs[0].set_render(True)
 
-    train_model = A2CAgent("train_model", True, sess, input_shape, action_size,
+    train_model = A2CAgent("train_model", sess, input_shape, action_size,
                            lr, GAMMA, LAMBDA, max_grad_norm, ent_coef, vf_coef, True)
-    sess.run(tf.global_variables_initializer())
     while True:
         state_generator = StateGenerator(frame_size, stack_size)
         state = state_generator.get_stacked_frames(env.reset(), True)
@@ -38,22 +37,12 @@ if __name__ == "__main__":
             env.render()
 
             policy, value = train_model.get_actions_and_values(np.array([state]))
-            action = np.random.choice(
-                np.arange(action_size), 1, p=np.squeeze(policy))[0]
-            env.step(action)
+            action = np.random.choice(np.arange(action_size), p=np.squeeze(policy))
             
-            reward = 0
-            for i in range(0, skip_frames):
-                raw_state, frame_reward, done, info = env.step(action)
-                if frame_reward == -15:
-                    done = True
-                    reward = -15
-                    raw_state = env.reset()
-                    break
-                else:
-                    reward += frame_reward
-
-            reward /= 60
-            episodes_reward += reward
+            
+            raw_state, frame_reward, done, info = env.step(action)
+            if done:
+                raw_state = env.reset()
+                
             state = state_generator.get_stacked_frames(raw_state, False)
         print("score:", episodes_reward)

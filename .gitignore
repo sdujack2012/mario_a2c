@@ -3,3 +3,4 @@ screenshots
 *.h5
 .vscode
 model.ckpt.*
+log

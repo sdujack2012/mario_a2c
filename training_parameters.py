@@ -1,7 +1,6 @@
 
 
 # traning parameters
-input_shape = (80, 100, 4)
 sample_size = 32
 epoch = 1
 max_episodes = 2000
@@ -15,13 +14,13 @@ render = True
 load_model = True
 episodes_before_training = 10
 n_env = 4
-n_steps = 200
-max_grad_norm = 0.5
+n_steps = 5
+max_grad_norm = 0.3
 ent_coef = 0.001
 vf_coef = 0.5
 GAMMA = 0.99
 LAMBDA = 0.95
-lr = 0.000003 
+lr = 0.00001
 skip_frames = 4
 
 # reward gamma
@@ -37,5 +36,6 @@ max_priority = 1.0
 # state
 top_cutoff = 32
 bottom_cutoff = 210
-frame_size = (80, 100)
+frame_size = (84, 84)
 stack_size = 4
+input_shape = (84, 84, stack_size)

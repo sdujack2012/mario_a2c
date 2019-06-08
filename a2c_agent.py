@@ -4,14 +4,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import random
 
-from utils import create_layers
-
-conv2d, dense, flatten = create_layers()
-
-
 class A2CAgent():
 
-    def __init__(self, name, trainable, sess, input_shape, action_size, lr, GAMMA, LAMBDA, max_grad_norm, ent_coef, vf_coef, loadModel):
+    def __init__(self, name, sess, input_shape, action_size, lr, GAMMA, LAMBDA, max_grad_norm, ent_coef, vf_coef, loadModel):
         self.sess = sess
         self.input_shape = input_shape
         self.action_size = action_size
@@ -21,89 +16,87 @@ class A2CAgent():
         self.max_grad_norm = max_grad_norm
         self.ent_coef = ent_coef
         self.vf_coef = vf_coef
-        self.trainable = trainable
         self.name = name
 
-        with tf.variable_scope(self.name+"/", reuse=tf.AUTO_REUSE):
-            self.state_input = tf.placeholder(tf.float64, shape=(
-                None, *self.input_shape), name="state")
-            self.actions_input = tf.placeholder(tf.uint8, shape=(
-                None,), name="actions_input")
-            self.cumulative_rewards_input = tf.placeholder(
-                tf.float64, shape=(None,), name="cumulative_rewards_input")
-            self.state_values_input = tf.placeholder(
-                tf.float64, shape=(None,), name="state_values_input")
+        self.state = tf.placeholder(tf.uint8, shape=(None, *self.input_shape), name="state")
+        self.actions = tf.placeholder(tf.uint8, shape=(None,), name="actions")
+        self.cumulative_rewards = tf.placeholder(tf.float32, shape=(None,), name="cumulative_rewards")
+        self.advantages = tf.placeholder(tf.float32, shape=(None,), name="advantages")
+        self.episode_rewards = tf.placeholder(tf.float32, shape=(), name="episode_rewards")
+        self.max_episode_rewards = tf.placeholder(tf.float32, shape=(), name="max_episode_rewards")
 
-        self.actor_out, self.critic_out, self.saver = self._build_agent(
-            self.trainable)
+        self.policy, self.value, self.saver = self._build_agent()
 
-        if self.trainable:
-            self.train_model, self.actor_loss, self.critic_loss, self.entropy = self._build_ops()
+        self.train_model, self.policy_loss, self.value_loss, self.entropy = self._build_ops()
+        self.sess.run(tf.initialize_variables(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.name)))
 
         if loadModel:
             self.load_weights()
-
-    def _build_agent(self, trainable=True):
+            
+    def _build_agent(self):
         with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE):
+            
+            x_conv = tf.cast(self.state, tf.float32) / 255.0
+            conv1 = tf.layers.conv2d(inputs=x_conv, filters=32, kernel_size=[8,8], strides=(4, 4), activation=tf.nn.relu, kernel_initializer=tf.contrib.layers.xavier_initializer_conv2d())
+            conv2 = tf.layers.conv2d(inputs=conv1, filters=64, kernel_size=[4,4], strides=(2, 2), activation=tf.nn.relu, kernel_initializer=tf.contrib.layers.xavier_initializer_conv2d())
+            conv3 = tf.layers.conv2d(inputs=conv2, filters=64, kernel_size=[3,3], strides=(1, 1), activation=tf.nn.relu, kernel_initializer=tf.contrib.layers.xavier_initializer_conv2d())
+            
+            conv_out = tf.contrib.layers.flatten(conv3)
+            shared_dense = tf.layers.dense(conv_out, 512, activation=tf.nn.relu, kernel_initializer=tf.contrib.layers.xavier_initializer())
+        
+            policy_logits = tf.layers.dense(shared_dense, self.action_size, kernel_initializer=tf.contrib.layers.xavier_initializer())
+            policy = tf.nn.softmax(policy_logits)
+            
+            value = tf.layers.dense(shared_dense, 1, kernel_initializer=tf.contrib.layers.xavier_initializer())
 
-            self.sess.run(tf.local_variables_initializer())
+            saver = tf.train.Saver(var_list=tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES))
 
-            shared_net = conv2d(self.state_input, 3, 32,
-                                "VALID", strides=2, activation=tf.nn.relu, trainable=trainable)
-            shared_net = conv2d(shared_net, 3, 32, "VALID",
-                                strides=2, activation=tf.nn.relu, trainable=trainable)
-            shared_net = conv2d(shared_net, 3, 32, "VALID",
-                                strides=1, activation=tf.nn.relu, trainable=trainable)
-            shared_net = conv2d(shared_net, 3, 32, "VALID",
-                                strides=1, activation=tf.nn.relu, trainable=trainable)
-
-            shared_net = flatten(shared_net)
-
-            actor_out = dense(
-                shared_net, 512, activation=tf.nn.relu, trainable=trainable)
-            actor_out = dense(actor_out, self.action_size,
-                              activation=tf.nn.softmax, trainable=trainable)
-
-            critic_out = dense(
-                shared_net, 512, activation=tf.nn.relu, trainable=trainable)
-            critic_out = dense(critic_out, 1, trainable=trainable)
-
-            saver = tf.train.Saver(var_list=tf.get_collection(
-                tf.GraphKeys.GLOBAL_VARIABLES, scope=self.name))
-
-            return actor_out, critic_out, saver
+            return policy, value, saver
 
     def _build_ops(self):
-        with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE):
-            advantages = self.cumulative_rewards_input - self.critic_out
+        with tf.variable_scope(self.name):
+            local_vars = tf.trainable_variables()
 
-            critic_loss = tf.reduce_mean(tf.square(advantages))
+        with tf.name_scope("{}_gradient".format(self.name)):
+            value_loss = 0.5 * tf.reduce_mean(tf.square(tf.squeeze(self.value) - self.cumulative_rewards))
+            tf.summary.scalar('value_loss', value_loss)
 
-            action_one_hot = tf.one_hot(self.actions_input, self.action_size, dtype=tf.float64)
-            logs = tf.log(tf.reduce_sum(
-                self.actor_out * action_one_hot, axis=1))
-            actor_loss = tf.reduce_mean(logs * advantages)
+            action_one_hot = tf.one_hot(self.actions, self.action_size, dtype=tf.float32)
+            neg_log_policy = -tf.log(tf.clip_by_value(self.policy, 1e-7, 1))
+            policy_loss = tf.reduce_mean(tf.reduce_sum(neg_log_policy * action_one_hot, axis=1) * self.advantages)
+        
+            tf.summary.scalar('policy_loss', policy_loss)
 
-            entropy = tf.reduce_mean(self.actor_out * tf.log(self.actor_out))
+            entropy = tf.reduce_mean(tf.reduce_sum(self.policy * neg_log_policy, axis=1))
+        
+            tf.summary.scalar('entropy_loss', entropy)
 
-            loss = self.vf_coef * critic_loss - actor_loss - self.ent_coef * entropy
+            total_loss = self.vf_coef * value_loss + policy_loss - self.ent_coef * entropy
+
+            tf.summary.scalar('total_loss', policy_loss)
+
+            tf.summary.scalar('episode_rewards', self.episode_rewards)
+            tf.summary.scalar('max_episode_rewards', self.max_episode_rewards)
 
             optimizer = tf.train.AdamOptimizer(learning_rate=self.lr)
 
-            params = tf.trainable_variables()
-            grads = tf.gradients(loss, params)
+            grads = tf.gradients(total_loss, local_vars)
 
             if self.max_grad_norm is not None:
-                # Clip the gradients (normalize)
                 grads, _ = tf.clip_by_global_norm(grads, self.max_grad_norm)
-                grads = list(zip(grads, params))
+                grads = list(zip(grads, local_vars))
+
+            l2_norm = lambda t: tf.sqrt(tf.reduce_sum(tf.pow(t, 2)))
+            for gradient, variable in grads:
+                tf.summary.histogram("gradients/" + variable.name, l2_norm(gradient))
+                tf.summary.histogram("variables/" + variable.name, l2_norm(variable))
 
             train_model = optimizer.apply_gradients(grads)
 
-            return train_model, actor_loss, critic_loss, entropy
+            return train_model, policy_loss, value_loss, entropy
 
     def sync_from_model(self, from_model):
-        update_weights = [tf.assign(new, old) for (new, old) in zip(
+        update_weights = [tf.assign(to_var, from_var) for (to_var, from_var) in zip(
             tf.trainable_variables(self.name), tf.trainable_variables(from_model.name))]
         self.sess.run(update_weights)
 
@@ -113,10 +106,23 @@ class A2CAgent():
     def load_weights(self):
         self.saver.restore(self.sess, f"./{self.name}.ckpt")
 
-    def get_action_and_value(self, state):
-        return self.sess.run([self.actor_out, self.critic_out], feed_dict={self.state_input: state})
+    def get_actions_and_values(self, state):
+        return self.sess.run([self.policy, self.value], feed_dict={self.state: state})
 
-    def train(self, states, actions, cumulative_rewards):
-        _, critic_loss, actor_loss, entropy = self.sess.run([self.train_model, self.critic_loss, self.actor_loss, self.entropy], {
-                                                   self.state_input: states, self.actions_input: actions, self.cumulative_rewards_input: cumulative_rewards})
-        print(f"critic_loss:{critic_loss}, actor_loss:{actor_loss}, entropy:{entropy}")
+    def get_action(self, state):
+        return self.sess.run(self.policy, feed_dict={self.state: state})
+
+    def get_value(self, state):
+        return self.sess.run(self.value, feed_dict={self.state: state})
+
+    def train(self, states, actions, cumulative_rewards, advantages):
+        _, value_loss, policy_loss, entropy = self.sess.run([self.train_model, self.value_loss, self.policy_loss, self.entropy], {
+                                                   self.state: states, self.actions: actions, self.cumulative_rewards: cumulative_rewards, self.advantages: advantages})
+        print(f"critic_loss:{value_loss}, actor_loss:{policy_loss}, entropy:{entropy}")
+
+    def get_summary(self, states, actions, cumulative_rewards, advantages, max_episode_rewards, episode_rewards):
+        summaries_op = tf.summary.merge_all()
+        summary = self.sess.run(summaries_op, feed_dict={
+                                                   self.max_episode_rewards: max_episode_rewards, self.episode_rewards: episode_rewards, self.state: states, self.actions: actions, self.cumulative_rewards: cumulative_rewards, self.advantages: advantages})
+        return summary
+            

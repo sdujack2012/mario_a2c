@@ -34,15 +34,16 @@ if __name__ == "__main__":
 
         episodes_reward = 0
         while True:
-            env.render()
+            
 
             policy, value = train_model.get_actions_and_values(np.array([state]))
             action = np.random.choice(np.arange(action_size), p=np.squeeze(policy))
             
-            
-            raw_state, frame_reward, done, info = env.step(action)
-            if done:
-                raw_state = env.reset()
-                
+            for i in range(0, skip_frames):
+                env.render()
+                raw_state, frame_reward, done, info = env.step(action)
+                if frame_reward == -15 or done:
+                    raw_state = env.reset()
+                    break
+
             state = state_generator.get_stacked_frames(raw_state, False)
-        print("score:", episodes_reward)

@@ -11,7 +11,7 @@ from training_parameters import skip_frames, ent_coef, vf_coef, max_grad_norm, e
 
 class EnvWrapper():
     def __init__(self, frame_size, skip_frames, stack_size):
-        self.env = gym_super_mario_bros.make('SuperMarioBros-v0')
+        self.env = gym_super_mario_bros.make('SuperMarioBrosRandomStages-v0')
         self.env = BinarySpaceToDiscreteSpaceEnv(self.env, SIMPLE_MOVEMENT)
         self.agent = None
         self.frame_size = frame_size
@@ -41,7 +41,7 @@ class EnvWrapper():
 
             for i in range(0, self.skip_frames):
                 raw_state, frame_reward, done, info = self.env.step(action)
-                if frame_reward == -15:
+                if frame_reward == -15 or done:
                     self.episode += 1
                     done = True
                     reward = -15 * self.skip_frames

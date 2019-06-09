@@ -15,7 +15,7 @@ from a2c_agent import A2CAgent
 from state_generator import StateGenerator
 from utils import preprocess_experiences
 
-from training_parameters import n_env, n_steps, skip_frames, ent_coef, vf_coef, max_grad_norm, episodes_before_training, render, input_shape, lr, GAMMA, LAMBDA, load_model, frame_size, stack_size, max_steps
+from training_parameters import sample_size, epoch, n_env, n_steps, skip_frames, ent_coef, vf_coef, max_grad_norm, episodes_before_training, render, input_shape, lr, GAMMA, LAMBDA, load_model, frame_size, stack_size, max_steps
 
 def run_env(env):
     env.step(n_steps)
@@ -30,8 +30,14 @@ if __name__ == "__main__":
     tf.reset_default_graph()
     gpu_options = tf.GPUOptions(allow_growth=True)
     sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
-    train_model = A2CAgent("train_model", sess, input_shape, action_size,
+    train_model = A2CAgent("train_model", True, sess, input_shape, action_size,
                            lr, GAMMA, LAMBDA, max_grad_norm, ent_coef, vf_coef, load_model)
+    
+    old_model = A2CAgent("old_model", False, sess, input_shape, action_size,
+                           lr, GAMMA, LAMBDA, max_grad_norm, ent_coef, vf_coef, False)
+
+    sync_ops = old_model.create_sync_ops(train_model)
+    sess.run(sync_ops)
     summary_writer = tf.summary.FileWriter("./log/sum", sess.graph)
     
 
@@ -39,7 +45,7 @@ if __name__ == "__main__":
 
     
     for env in envs:
-        env.set_agent(train_model)
+        env.set_agent(old_model)
     p = ThreadPool(n_env)
 
     t = 0
@@ -63,14 +69,21 @@ if __name__ == "__main__":
                 advantages += tempAdvantages
 
         experiences = list(zip(states, actions, cumulative_rewards, advantages))
-        random.shuffle(experiences)
-
-        states = np.array([experience[0] for experience in  experiences])
-        actions = np.array([experience[1] for experience in  experiences])
-        cumulative_rewards = np.array([experience[2] for experience in  experiences])
-        advantages = np.array([experience[3] for experience in  experiences])
         
-        train_model.train(states, actions, cumulative_rewards, advantages)
+        print("experiences size:", len(experiences))
+        sample_size = len(experiences) // epoch
+        for _ in range(epoch):
+            sampled_experineces = random.sample(experiences, sample_size)
+            states = np.array([experience[0] for experience in sampled_experineces])
+            actions = np.array([experience[1] for experience in sampled_experineces])
+            cumulative_rewards = np.array([experience[2] for experience in sampled_experineces])
+            advantages = np.array([experience[3] for experience in sampled_experineces])
+            old_policy = old_model.get_action(states)
+
+            train_model.train(states, actions, cumulative_rewards, advantages, old_policy)
+
+        sess.run(sync_ops)
+
         if t % 100 == 0:
             print("saving weights")
             train_model.save_weights()
@@ -78,5 +91,5 @@ if __name__ == "__main__":
             print("adding summary")
             max_episode_reward, episode_reward = envs[0].get_max_and_current_episode_reward()
 
-            summary = train_model.get_summary(states, actions, cumulative_rewards, advantages, max_episode_reward, episode_reward)
+            summary = train_model.get_summary(states, actions, cumulative_rewards, advantages, max_episode_reward, episode_reward,old_policy)
             summary_writer.add_summary(summary, t)

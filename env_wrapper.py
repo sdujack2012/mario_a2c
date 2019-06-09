@@ -44,14 +44,13 @@ class EnvWrapper():
                 if frame_reward == -15 or done:
                     self.episode += 1
                     done = True
-                    reward = -15 * self.skip_frames
+                    if frame_reward == -15:
+                        reward = -15 * self.skip_frames
+                    else:
+                        reward = 15 * self.skip_frames
+                        
                     raw_state = self.env.reset()
-                    self.episodeReward = self.current_episode_reward
 
-                    if self.maxEpisodeReward < self.episodeReward:
-                        self.maxEpisodeReward = self.episodeReward
-
-                    self.current_episode_reward = 0
                     break
                 else:
                     reward += frame_reward
@@ -63,7 +62,7 @@ class EnvWrapper():
             self.current_episode_reward += reward
 
             next_state = self.state_generator.get_stacked_frames(
-                raw_state, done, self.episode % 20 == 0)
+                raw_state, done, self.episode % 5 == 0)
 
             experience = []
             experience.append(self.state)
@@ -77,6 +76,12 @@ class EnvWrapper():
             self.info = info
 
             if self.done:
+                self.episodeReward = self.current_episode_reward
+
+                if self.maxEpisodeReward < self.episodeReward:
+                    self.maxEpisodeReward = self.episodeReward
+
+                self.current_episode_reward = 0
                 break
 
     def get_experiences(self):

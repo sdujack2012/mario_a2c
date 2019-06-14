@@ -11,7 +11,7 @@ from training_parameters import skip_frames, ent_coef, vf_coef, max_grad_norm, e
 
 class EnvWrapper():
     def __init__(self, frame_size, skip_frames, stack_size):
-        self.env = gym_super_mario_bros.make('SuperMarioBros-v0')
+        self.env = gym_super_mario_bros.make('SuperMarioBrosRandomStages-v0')
         self.env = BinarySpaceToDiscreteSpaceEnv(self.env, SIMPLE_MOVEMENT)
         self.agent = None
         self.frame_size = frame_size
@@ -24,7 +24,14 @@ class EnvWrapper():
         self.env.reset()
         raw_state, _, _, self.info = self.env.step(0)
         self.state = self.state_generator.get_stacked_frames(raw_state, True)
-        self.experiences = []
+
+        self.states = []
+        self.policies = []
+        self.actions = []
+        self.rewards = []
+        self.values = []
+        self.dones = []
+
         self.episode = 0
         self.episodeReward = 0
         self.maxEpisodeReward = 0
@@ -41,53 +48,70 @@ class EnvWrapper():
 
             for i in range(0, self.skip_frames):
                 raw_state, frame_reward, done, info = self.env.step(action)
-                if frame_reward == -15:
+                if frame_reward == -15 or done:
                     self.episode += 1
                     done = True
-                    reward = -15 * self.skip_frames
+                    if frame_reward == -15:
+                        reward = -15 * self.skip_frames
+                    else:
+                        reward = 15 * self.skip_frames
+
                     raw_state = self.env.reset()
-                    self.episodeReward = self.current_episode_reward
 
-                    if self.maxEpisodeReward < self.episodeReward:
-                        self.maxEpisodeReward = self.episodeReward
-
-                    self.current_episode_reward = 0
                     break
                 else:
                     reward += frame_reward
                     reward += (5 if (info["score"] -
                                      self.info["score"]) > 0 else 0)
 
-            reward /= 15 * self.skip_frames
+            reward /= (15 * self.skip_frames)
 
             self.current_episode_reward += reward
 
             next_state = self.state_generator.get_stacked_frames(
-                raw_state, done, self.episode % 20 == 0)
+                raw_state, done, frame_reward == 15 or (done and self.episode % 100 == 0), self.current_episode_reward)
 
-            experience = []
-            experience.append(self.state)
-            experience.append(action)
-            experience.append(reward)
-            experience.append(value)
+            self.states.append(self.state)
+            self.policies.append(np.squeeze(policy))
+            self.actions.append(action)
+            self.rewards.append(reward)
+            self.values.append(np.squeeze(value))
+            self.dones.append(done)
 
-            self.experiences.append(experience)
             self.state = next_state
             self.done = done
             self.info = info
 
             if self.done:
-                break
+                self.episodeReward = self.current_episode_reward
+
+                if self.maxEpisodeReward < self.episodeReward:
+                    self.maxEpisodeReward = self.episodeReward
+
+                self.current_episode_reward = 0
 
     def get_experiences(self):
         if self.done:
             next_state_value = 0
         else:
-            next_state_value = self.agent.get_value(np.array([self.state]))[0]
+            next_state_value = np.squeeze(self.agent.get_value(np.array([self.state])))
 
-        collected_experiences = self.experiences
-        self.experiences = []
-        return next_state_value, collected_experiences
+        states = self.states
+        actions = self.actions
+        policies = self.policies
+        rewards = self.rewards
+        values = self.values
+        dones = [1 if done else 0 for done in self.dones]
+        next_values = values[1:] + [next_state_value]
+
+        self.states = []
+        self.policies = []
+        self.actions = []
+        self.rewards = []
+        self.values = []
+        self.dones = []
+
+        return states, policies, actions, rewards, values, next_values, dones
 
     def get_action_size(self):
         return self.action_size

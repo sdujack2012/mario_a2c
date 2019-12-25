@@ -21,7 +21,7 @@ class StateGenerator:
         self.all_frames.append(screenshot)
         if is_creating_video:
             currentDT = datetime.datetime.now()
-            imageio.mimsave(f"./screenshots/videos_{currentDT.strftime('%H%M%S')}_{rewards}.gif", self.all_frames)
+            imageio.mimsave(f"./screenshots/videos_{currentDT.strftime('%H%M%S')}_{round(rewards, 2)}.gif", self.all_frames)
 
         if is_new_episode:
             self.all_frames = []

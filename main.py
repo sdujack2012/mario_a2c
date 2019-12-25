@@ -1,5 +1,5 @@
 import tensorflow as tf
-from nes_py.wrappers import BinarySpaceToDiscreteSpaceEnv
+from nes_py.wrappers import JoypadSpace
 import gym_super_mario_bros
 import time
 from gym_super_mario_bros.actions import SIMPLE_MOVEMENT

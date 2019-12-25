@@ -1,4 +1,4 @@
-from nes_py.wrappers import BinarySpaceToDiscreteSpaceEnv
+from nes_py.wrappers import JoypadSpace
 import gym_super_mario_bros
 import time
 from gym_super_mario_bros.actions import SIMPLE_MOVEMENT
@@ -12,7 +12,7 @@ from training_parameters import skip_frames, ent_coef, vf_coef, max_grad_norm, e
 class EnvWrapper():
     def __init__(self, frame_size, skip_frames, stack_size):
         self.env = gym_super_mario_bros.make('SuperMarioBrosRandomStages-v0')
-        self.env = BinarySpaceToDiscreteSpaceEnv(self.env, SIMPLE_MOVEMENT)
+        self.env = JoypadSpace(self.env, SIMPLE_MOVEMENT)
         self.agent = None
         self.frame_size = frame_size
         self.stack_size = stack_size

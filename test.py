@@ -1,5 +1,5 @@
 import tensorflow as tf
-from nes_py.wrappers import BinarySpaceToDiscreteSpaceEnv
+from nes_py.wrappers import JoypadSpace
 import gym_super_mario_bros
 import time
 from gym_super_mario_bros.actions import SIMPLE_MOVEMENT
@@ -22,7 +22,7 @@ if __name__ == "__main__":
     sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
 
     env = gym_super_mario_bros.make('SuperMarioBrosRandomStages-v0')
-    env = BinarySpaceToDiscreteSpaceEnv(env, SIMPLE_MOVEMENT)
+    env = JoypadSpace(env, SIMPLE_MOVEMENT)
     action_size = env.action_space.n
 
     # envs[0].set_render(True)
